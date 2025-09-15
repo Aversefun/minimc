@@ -1,4 +1,4 @@
-//! New Rust project
+//! Tiny Rust minecraft server
 #![warn(
     missing_docs,
     clippy::missing_docs_in_private_items,

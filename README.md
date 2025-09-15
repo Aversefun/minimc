@@ -1,3 +1,3 @@
-# New Rust Project
+# `minimc`
 
-IMPORTANT: RUN init.sh!
+Tiny Rust minecraft server
