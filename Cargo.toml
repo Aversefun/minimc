@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.99"
-simdnbt = "0.8.0"
+simdnbt = { version = "0.8.0", default-features = false, features = ["derive"] }

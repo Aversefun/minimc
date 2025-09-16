@@ -5,17 +5,21 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+use anyhow::bail;
+use simdnbt::{borrow::BaseNbtCompound, Mutf8Str};
+
 use crate::{McProto, McProtoSelf, McReader, McWriter};
 
-/// Macro for generating a `McProto` implemetation for number types.
+/// Macro for generating a `McProto` implemetation for number types (or any type with
+/// a `.to_be_bytes` and `::from_be_bytes` function).
 macro_rules! int_impl {
     ($ty:ty, $bits:expr) => {
         impl McProtoSelf for $ty {
             type Meta = ();
-            fn write(self, writer: &mut dyn McWriter) -> Result<(), &'static str> {
+            fn write(self, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
                 writer.write(&self.to_be_bytes())
             }
-            fn read(reader: &mut dyn McReader, (): ()) -> Result<Self, &'static str> {
+            fn read(reader: &mut dyn McReader, (): ()) -> Result<Self, anyhow::Error> {
                 let mut bytes = [0x00u8; ($bits) as usize / 8];
                 reader.read(&mut bytes)?;
                 Ok(<$ty>::from_be_bytes(bytes))
@@ -26,26 +30,26 @@ macro_rules! int_impl {
 
 impl McProtoSelf for bool {
     type Meta = ();
-    fn write(self, writer: &mut dyn McWriter) -> Result<(), &'static str> {
+    fn write(self, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
         writer.write(&[u8::from(!self)])
     }
-    fn read(reader: &mut dyn McReader, (): ()) -> Result<Self, &'static str> {
+    fn read(reader: &mut dyn McReader, (): ()) -> Result<Self, anyhow::Error> {
         let mut bytes = [0xFFu8];
         reader.read(&mut bytes)?;
         Ok(match bytes[0] {
             0x00 => false,
             0x01 => true,
-            _ => return Err("bad boolean value"),
+            _ => bail!("bad boolean value"),
         })
     }
 }
 
 impl McProtoSelf for u8 {
     type Meta = ();
-    fn write(self, writer: &mut dyn McWriter) -> Result<(), &'static str> {
+    fn write(self, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
         writer.write(&[self])
     }
-    fn read(reader: &mut dyn McReader, (): ()) -> Result<Self, &'static str> {
+    fn read(reader: &mut dyn McReader, (): ()) -> Result<Self, anyhow::Error> {
         let mut bytes = [0x00u8];
         reader.read(&mut bytes)?;
         Ok(bytes[0])
@@ -101,7 +105,7 @@ impl VarNum {
 }
 
 impl McProto<u32> for VarNum {
-    fn write(mut value: u32, writer: &mut dyn McWriter) -> Result<(), &'static str> {
+    fn write(mut value: u32, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
         loop {
             if (value & !u32::from(Self::SEGMENT_BITS)) == 0 {
                 return value.write(writer);
@@ -111,7 +115,7 @@ impl McProto<u32> for VarNum {
             value >>= 7;
         }
     }
-    fn read(reader: &mut dyn McReader, (): Self::Meta) -> Result<u32, &'static str> {
+    fn read(reader: &mut dyn McReader, (): Self::Meta) -> Result<u32, anyhow::Error> {
         let mut value = 0u32;
         let mut position = 0u8;
 
@@ -125,7 +129,7 @@ impl McProto<u32> for VarNum {
             position += 7;
 
             if position >= 32 {
-                return Err("VarInt is too large");
+                bail!("VarInt is too large");
             }
         }
     }
@@ -133,7 +137,7 @@ impl McProto<u32> for VarNum {
 }
 
 impl McProto<u64> for VarNum {
-    fn write(mut value: u64, writer: &mut dyn McWriter) -> Result<(), &'static str> {
+    fn write(mut value: u64, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
         loop {
             if (value & !u64::from(Self::SEGMENT_BITS)) == 0 {
                 return value.write(writer);
@@ -143,7 +147,7 @@ impl McProto<u64> for VarNum {
             value >>= 7;
         }
     }
-    fn read(reader: &mut dyn McReader, (): Self::Meta) -> Result<u64, &'static str> {
+    fn read(reader: &mut dyn McReader, (): Self::Meta) -> Result<u64, anyhow::Error> {
         let mut value = 0u64;
         let mut position = 0u8;
 
@@ -157,7 +161,7 @@ impl McProto<u64> for VarNum {
             position += 7;
 
             if position >= 64 {
-                return Err("VarLong is too large");
+                bail!("VarLong is too large");
             }
         }
     }
@@ -166,14 +170,14 @@ impl McProto<u64> for VarNum {
 
 impl McProtoSelf for String {
     type Meta = Length;
-    fn write(self, writer: &mut dyn McWriter) -> Result<(), &'static str> {
+    fn write(self, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
         VarNum::write(self.encode_utf16().count() as u32, writer)?;
         for byte in self.bytes() {
             byte.write(writer)?;
         }
         Ok(())
     }
-    fn read(reader: &mut dyn McReader, _: Self::Meta) -> Result<Self, &'static str> {
+    fn read(reader: &mut dyn McReader, _: Self::Meta) -> Result<Self, anyhow::Error> {
         let length: u32 = VarNum::read(reader, ())?;
         let mut out = Vec::<u8>::new();
         let mut curr_length = 0u32;
@@ -185,5 +189,16 @@ impl McProtoSelf for String {
         }
 
         Ok(String::from_utf8(out).unwrap())
+    }
+}
+
+impl McProtoSelf for simdnbt::owned::Nbt {
+    type Meta = ();
+    fn write(self, writer: &mut dyn McWriter) -> Result<(), anyhow::Error> {
+        let mut vec = Vec::new();
+        simdnbt::owned::Nbt::write(&self, &mut vec);
+        writer.write(vec.as_slice())
+    }
+    fn read(reader: &mut dyn McReader, meta: Self::Meta) -> Result<Self, anyhow::Error> {
     }
 }
